@@ -19,6 +19,8 @@
 unsigned long sendNTPpacket(IPAddress& address);    // function prototype
 byte sendEmail();                                   // function prototype
 byte eRcv();                                        // function prototype
+void changeColour();                                // function prototype
+void turnOnLED();                                   // function prototype
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -37,17 +39,31 @@ byte packetBuffer[ NTP_PACKET_SIZE]; // buffer to hold incoming and outgoing pac
 unsigned int localPort = 2390;    // local port to listen for UDP packets
 
 // Motion sensor
-int ledPin = D10;                 // pin for LED
-int inputPin = D13;               // pin for PIR sensor
+int relayPin = D10;               // pin for relay
+int motionPin = D13;              // pin for PIR sensor
 int state = LOW;                  // initially no motion detected 
 int var = 0;                      // variable for reading the pin status
 int emailinterval = 150;          // time interval between e-mails sent (seconds)
 int timerinterval = 5;            // time interval from no motion detected to light is turned off (seconds)
 unsigned long starttime;          // epoch at time of detected movement OR change to no movement
 unsigned long timevar;            // epoch at time of last e-mail sent
+int infrared = HIGH;
+
+// Colour LED pin
+int ledPin1 = D9;
+int ledPin2 = D8;
+int ledPin3 = D2; 
+
+// Colour output
+int ledRedOutput = 0;
+int ledGreenOutput = 0;
+int ledBlueOutput = 0;
+int maxOutputLed = 255;
+unsigned long delayTime = 10000;
 
 // BLE HM-10
 int c;            // variable to store security setting
+int z = 4;        // variable to store colour setting initialised to white colour
 boolean DEBUG = true;
 #define rxPin 12
 #define txPin 13
@@ -61,10 +77,10 @@ SoftwareSerial mySerial(rxPin, txPin); // RX, TX
 // A UDP instance to let us send and receive packets over UDP
 WiFiUDP udp;
 // SSID and password of WiFi network
-//const char* SSID = "DTU-Networks";
-//const char* PASS = "Fotonik343";
-const char* SSID = "111";
-const char* PASS = "sokrates";
+const char* SSID = "DTU-Networks";
+const char* PASS = "Fotonik343";
+//const char* SSID = "111";
+//const char* PASS = "sokrates";
 char server[] = "mail.smtp2go.com";
 ADC_MODE(ADC_VCC);
 
@@ -72,9 +88,9 @@ WiFiClient client;
 
 
 void setup() {
-  pinMode(ledPin, OUTPUT);      // declare LED/Light bulb as output
+  pinMode(relayPin, OUTPUT);    // declare LED/Light bulb as output
   pinMode(txPin, OUTPUT);       // declare transmit pin as output
-  pinMode(inputPin, INPUT);     // declare sensor as input
+  pinMode(motionPin, INPUT);    // declare sensor as input
 
   if (DEBUG) {
   Serial.begin(9600);
@@ -156,29 +172,65 @@ void setup() {
   // you can update it using AT+BAUDx command 
   // e.g. AT+BAUD0 for 9600 bauds
 
+//  turnOnLED();
+
 }
 
 void loop(){
   if (mySerial.available() > 0) {
-    c = mySerial.read();  
-    Serial.print("Security:");
-    if (c != 0)
-    {
-      // Non-zero input means "turn on SECURITY".
+    c = mySerial.read();
+    if (c == 1){
+      // Input value one means "turn on SECURITY".
+      Serial.print("Security:");
       Serial.println("  ON");
     }
-    else
-    {
+    else if (c == 0){
       // Input value zero means "turn off SECURITY".
+      Serial.print("Security:");
       Serial.println("  OFF");
-    }  
+    }
+    else if (c == 2){
+      z = 1;
+      changeColour();
+      // Input value two means red color scheme
+      Serial.println("Colour: RED");
+      turnOnLED();
+    }
+    else if (c == 3){
+      z = 2;
+      changeColour();
+      // Input value three means green color scheme
+      Serial.println("Colour: GREEN");
+      turnOnLED();
+    }
+    else if (c == 4){
+      z = 3;
+      changeColour();
+      // Input value four means blue color scheme
+      Serial.println("Colour: BLUE");
+      turnOnLED();
+    }
+    else if (c == 5){
+      z = 4;
+      changeColour();
+      // Input value five means white color scheme
+      Serial.println("Colour: WHITE");
+      turnOnLED();
+    }
+    else {
+      z = 5;
+      changeColour();
+      // Input value six means yellow color scheme
+      Serial.println("Colour: YELLOW");
+      turnOnLED();
+    }
   }
 
 
-  var = digitalRead(inputPin);   // read input value of PIR
-  if (var == HIGH) {             // check if motion is detected
-    digitalWrite(ledPin, HIGH);  // turn LED ON
-    starttime = now();           // sets time if motion is detected
+  var = digitalRead(motionPin);    // read input value of PIR
+  if (var == LOW) {               // check if motion is detected
+    digitalWrite(relayPin, HIGH);  // turn relay ON
+    starttime = now();             // sets time if motion is detected
     
     if (state == LOW) {
       // we have just turned on
@@ -187,10 +239,10 @@ void loop(){
       state = HIGH;
     }
 
-    if (now() - timevar > emailinterval && c != 0){  // only print email if security is turned on
+    if (now() - timevar > emailinterval && c != 0){  // only print email if security is turned on and if specified time interval have elapsed since last detection
       timevar = now();
       Serial.println("E-mail sent!");
-      byte ret = sendEmail();   // only sends email, if ~5 minutes have elapsed since last detection
+      byte ret = sendEmail();
     }
   }
   else {
@@ -200,7 +252,7 @@ void loop(){
       starttime = now();                 // resets timer when changing to no motion detected
     }
     if (now() - starttime > timerinterval) {
-     digitalWrite(ledPin, LOW);  // turn LED OFF
+     digitalWrite(relayPin, LOW);  // turn relay OFF
     }
   }
 }
@@ -320,3 +372,56 @@ unsigned long sendNTPpacket(IPAddress& address) {
   udp.write(packetBuffer, NTP_PACKET_SIZE);
   udp.endPacket();
 }
+
+void changeColour(){
+  switch(z) {
+
+  case 1:  //red
+    ledRedOutput = maxOutputLed;
+    ledGreenOutput = 0;
+    ledBlueOutput = 0;
+
+    break;
+
+  case 2:  //green
+    ledRedOutput = 0;
+    ledGreenOutput = maxOutputLed;
+    ledBlueOutput = 0;
+
+    break;
+
+  case 3: //blue
+    ledRedOutput = 0;
+    ledGreenOutput = 0;
+    ledBlueOutput = maxOutputLed;
+
+    break;
+
+  case 4: //white
+    ledRedOutput = maxOutputLed;
+    ledGreenOutput = maxOutputLed;
+    ledBlueOutput = maxOutputLed;
+
+    break;
+
+  case 5: //yellow
+    ledRedOutput = maxOutputLed;
+    ledGreenOutput = maxOutputLed;
+    ledBlueOutput = 0;
+
+    break;
+  }
+}
+
+void turnOnLED(){    
+  for (int i = 0; i <= maxOutputLed; i++) {
+    analogWrite(ledPin1, i * ledRedOutput / maxOutputLed);
+    analogWrite(ledPin2, i * ledGreenOutput / maxOutputLed);
+    analogWrite(ledPin3, i * ledBlueOutput / maxOutputLed);
+    delay(delayTime / maxOutputLed);
+    if (mySerial.available() > 0){
+      break;
+    }
+  }
+}
+
