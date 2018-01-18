@@ -227,34 +227,38 @@ void loop(){
   }
 
 
-  var = digitalRead(motionPin);    // read input value of PIR
-  if (var == LOW) {               // check if motion is detected
+  var = digitalRead(motionPin);    // read input value of sensor
+  if (var == LOW) {                // check if motion is detected
     digitalWrite(relayPin, HIGH);  // turn relay ON
     starttime = now();             // sets time if motion is detected
     
-    if (state == LOW) {
-      // we have just turned on
+    if (state == LOW) {            // if state is changed, print message
+
       Serial.println("Motion detected!");
-      // only print the output change
       state = HIGH;
     }
 
-    if (now() - timevar > emailinterval && c != 0){  // only print email if security is turned on and if specified time interval have elapsed since last detection
+    /*
+     * only print email if security is turned on
+     * and if specified time interval have elapsed since last detection
+     */
+    if (now() - timevar > emailinterval && c != 0){
       timevar = now();
       Serial.println("E-mail sent!");
       byte ret = sendEmail();
     }
   }
   else {
-    if (state == HIGH) {         // we have just turned off
+    if (state == HIGH) {                 // if state is changed, print message
       Serial.println("Motion ended!");
-      state = LOW;               // only print the output change
+      state = LOW;                       
       starttime = now();                 // resets timer when changing to no motion detected
     }
-    if (now() - starttime > timerinterval) {
+    if (now() - starttime > timerinterval) { 
      digitalWrite(relayPin, LOW);  // turn relay OFF
     }
   }
+  
 }
 
 
