@@ -3,7 +3,10 @@
  */
 
 /*
- * Kode til indstilling af ur er inspireret af: https://www.geekstips.com/arduino-time-sync-ntp-server-esp8266-udp/
+ * Code for synchronisation of clock inspired by: https://www.geekstips.com/arduino-time-sync-ntp-server-esp8266-udp/
+ * Code for e-mail notification inspired by: https://arduinodiy.wordpress.com/2016/12/28/sending-mail-with-an-esp8266/
+ * Code for Bluetooth communication inspired by: https://evothings.com/control-an-led-using-hm-10-ble-module-an-arduino-and-a-mobile-app/
+ * Code for motion detection inspired by: https://learn.adafruit.com/pir-passive-infrared-proximity-motion-sensor?view=all
  */
 
 /* Import libraries */
@@ -13,8 +16,6 @@
 #include <TimeLib.h>
 #include <SoftwareSerial.h>
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
 /* Funcion declarations*/
 unsigned long sendNTPpacket(IPAddress& address);    // function prototype
 byte sendEmail();                                   // function prototype
@@ -22,15 +23,10 @@ byte eRcv();                                        // function prototype
 void changeColour();                                // function prototype
 void turnOnLED();                                   // function prototype
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-/* Don't hardwire the IP address or we won't get the benefits of the pool.
- *  Lookup the IP address for the host name instead */
+/* IP of host address
+ * Found at: http://www.pool.ntp.org/zone/@ */
 IPAddress timeServerIP;  // time.nist.gov NTP server address
 const char* ntpServerName = "2.dk.pool.ntp.org";
-
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 /* Definitions*/
 // For time keeping
@@ -38,9 +34,16 @@ const int NTP_PACKET_SIZE = 48; // NTP time stamp is in the first 48 bytes of th
 byte packetBuffer[ NTP_PACKET_SIZE]; // buffer to hold incoming and outgoing packets
 unsigned int localPort = 2390;    // local port to listen for UDP packets
 
-// Motion sensor
-int relayPin = D10;               // pin for relay
-int motionPin = D13;              // pin for PIR sensor
+// Pins
+int relayPin = D10;               // relay
+int motionPin = D13;              // PIR sensor
+int ledPin1 = D9;                 // multi colour LED: red
+int ledPin2 = D8;                 // multi colour LED: green
+int ledPin3 = D2;                 // multi colour LED: blue
+int rxPin = 12;                   // RX pin on WEMOS D1
+int txPin = 13;                   // TX pin on WEMOS D1
+
+// Motion sensor variables
 int state = LOW;                  // initially no motion detected 
 int var = 0;                      // variable for reading the pin status
 int emailinterval = 150;          // time interval between e-mails sent (seconds)
@@ -49,38 +52,28 @@ unsigned long starttime;          // epoch at time of detected movement OR chang
 unsigned long timevar;            // epoch at time of last e-mail sent
 int infrared = HIGH;
 
-// Colour LED pin
-int ledPin1 = D9;
-int ledPin2 = D8;
-int ledPin3 = D2; 
-
-// Colour output
+// Multi colour LED variables
 int ledRedOutput = 0;
 int ledGreenOutput = 0;
 int ledBlueOutput = 0;
 int maxOutputLed = 255;
 unsigned long delayTime = 10000;
 
-// BLE HM-10
+// BLE HM-10 variables
 int c;            // variable to store security setting
 int z = 4;        // variable to store colour setting initialised to white colour
 boolean DEBUG = true;
-#define rxPin 12
-#define txPin 13
 
 SoftwareSerial mySerial(rxPin, txPin); // RX, TX  
 // Connect HM10        WeMoS D1
-//     Pin 1/RXD          Pin D12
-//     Pin 2/TXD          Pin D13
+//     RXD              Pin 12
+//     TXD              Pin 13
 
-// WIFI
 // A UDP instance to let us send and receive packets over UDP
 WiFiUDP udp;
 // SSID and password of WiFi network
 const char* SSID = "DTU-Networks";
 const char* PASS = "Fotonik343";
-//const char* SSID = "111";
-//const char* PASS = "sokrates";
 char server[] = "mail.smtp2go.com";
 ADC_MODE(ADC_VCC);
 
@@ -93,7 +86,7 @@ void setup() {
   pinMode(motionPin, INPUT);    // declare sensor as input
 
   if (DEBUG) {
-  Serial.begin(9600);
+  Serial.begin(9600);           // begin serial monitor at 9600 baud rate
   }
 
   // Connect to WiFi
@@ -110,7 +103,7 @@ void setup() {
   }
   Serial.println("");
   Serial.println("WiFi Connected");
-  Serial.print("IPess: ");
+  Serial.print("IP: ");
   Serial.println(WiFi.localIP());
 
   Serial.println("Starting UDP");
@@ -126,17 +119,17 @@ void setup() {
   delay(1000);
   
   int cb = udp.parsePacket();
-  if (!cb) {
+  if (!cb) {   // notify user if no packet is received
     Serial.println("no packet yet");
   }
   else {
-    Serial.print("packet received, length=");
+    Serial.print("Packet received, length=");
     Serial.println(cb);
     // We've received a packet, read the data from it
     udp.read(packetBuffer, NTP_PACKET_SIZE); // read the packet into the buffer
 
     //the timestamp starts at byte 40 of the received packet and is four bytes,
-    // or two words, long. First, esxtract the two words:
+    // or two words, long. First, extract the two words:
 
     unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
     unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
@@ -156,71 +149,68 @@ void setup() {
     Serial.println(epoch);
 
     // Set GMT+1 time
-    setTime(epoch + 3600);
+    setTime(epoch + 3600UL);
   }
-
   
   //  open software serial connection to the Bluetooth module.
   mySerial.begin(9600);
   if (DEBUG) {   
     Serial.println("BTSerial started at 9600");
   }
-  
-  // If the baudrate of the HM-10 module has been updated,
-  // you may need to change 9600 by another value
-  // Once you have found the correct baudrate,
-  // you can update it using AT+BAUDx command 
-  // e.g. AT+BAUD0 for 9600 bauds
 
-//  turnOnLED();
+  changeColour(); // set colour values to white
+  // write to LED
+  analogWrite(ledPin1, ledRedOutput); 
+  analogWrite(ledPin2, ledGreenOutput);
+  analogWrite(ledPin3, ledBlueOutput);
 
 }
 
 void loop(){
-  if (mySerial.available() > 0) {
-    c = mySerial.read();
-    if (c == 1){
-      // Input value one means "turn on SECURITY".
-      Serial.print("Security:");
-      Serial.println("  ON");
-    }
-    else if (c == 0){
-      // Input value zero means "turn off SECURITY".
+  if (mySerial.available() > 0) {   // check if data is sent from HM-10
+    c = mySerial.read();            // store data as a variable
+    if (c == 0){
+      // Input value 0 means "turn off SECURITY".
       Serial.print("Security:");
       Serial.println("  OFF");
     }
+    else if (c == 1){
+      // Input value 1 means "turn on SECURITY".
+      Serial.print("Security:");
+      Serial.println("  ON");
+    }
     else if (c == 2){
-      z = 1;
-      changeColour();
-      // Input value two means red color scheme
+      // Input value 2 means red color scheme
+      z = 1;            // store colour code as variable
+      changeColour();   // call function to change colour values
       Serial.println("Colour: RED");
-      turnOnLED();
+      turnOnLED();      // call function to fade in LED
     }
     else if (c == 3){
       z = 2;
       changeColour();
-      // Input value three means green color scheme
+      // Input value 3 means green color scheme
       Serial.println("Colour: GREEN");
       turnOnLED();
     }
     else if (c == 4){
       z = 3;
       changeColour();
-      // Input value four means blue color scheme
+      // Input value 4 means blue color scheme
       Serial.println("Colour: BLUE");
       turnOnLED();
     }
     else if (c == 5){
       z = 4;
       changeColour();
-      // Input value five means white color scheme
+      // Input value 5 means white color scheme
       Serial.println("Colour: WHITE");
       turnOnLED();
     }
     else {
       z = 5;
       changeColour();
-      // Input value six means yellow color scheme
+      // Input value 6 means yellow color scheme
       Serial.println("Colour: YELLOW");
       turnOnLED();
     }
@@ -262,8 +252,7 @@ void loop(){
 }
 
 
-byte sendEmail()
-{
+byte sendEmail(){
   byte thisByte = 0;
   byte respCode;
 
@@ -288,51 +277,50 @@ byte sendEmail()
   Serial.println(F("Sending Password"));
   // change to your base64, ASCII encoded password
   client.println("bWFQeFNVTXBhZTNt");//  SMTP Passw
-     if (!eRcv()) return 0;
-    Serial.println(F("Sending From"));   // change to your email address (sender)
-   client.println(F("MAIL From: theis_mj@hotmail.com"));// not important 
-   if (!eRcv()) return 0;   // change to recipient address
-    Serial.println(F("Sending To"));
-    client.println(F("RCPT To: theis_mj@hotmail.com"));
-    if (!eRcv()) return 0;
-    Serial.println(F("Sending DATA"));
-    client.println(F("DATA"));
-    if (!eRcv()) return 0;
-    Serial.println(F("Sending email"));   // change to recipient address
-    client.println(F("To: theis_mj@hotmail.com"));   // change to your address
-    client.println(F("From: theis_mj@hotmail.com"));
-    client.println(F("Subject: Home intrusion alert\r\n"));
-    client.println(F("There has been some movement."));
-    client.print(day());
-    client.print(F("-"));
-    client.print(month());
-    client.print(F("-"));
-    client.print(year());
-    client.print(F(" at "));
-    client.print(hour());
-    client.print(F(":"));
-    client.print(minute());
-    client.print(F(":"));
-    client.print(second());
-    client.println(F("."));
-    client.println(F("."));
-    if (!eRcv()) return 0;
-    Serial.println(F("Sending QUIT"));
-    client.println(F("QUIT"));
-    if (!eRcv()) return 0;
-    client.stop();
-    Serial.println(F("disconnected"));
-    return 1;
-  }
-  byte eRcv() {
-    byte respCode;
-    byte thisByte;
-    int loopCount = 0;
-    while (!client.available())
-  {
-      delay(1);
-      loopCount++;     // if nothing received for 10 seconds, timeout
-      if (loopCount > 10000) {
+  if (!eRcv()) return 0;
+  Serial.println(F("Sending From"));   // change to your email address (sender)
+  client.println(F("MAIL From: theis_mj@hotmail.com"));// not important 
+  if (!eRcv()) return 0;   // change to recipient address
+  Serial.println(F("Sending To"));
+  client.println(F("RCPT To: theis_mj@hotmail.com"));
+  if (!eRcv()) return 0;
+  Serial.println(F("Sending DATA"));
+  client.println(F("DATA"));
+  if (!eRcv()) return 0;
+  Serial.println(F("Sending email"));   // change to recipient address
+  client.println(F("To: theis_mj@hotmail.com"));   // change to your address
+  client.println(F("From: theis_mj@hotmail.com"));
+  client.println(F("Subject: Home intrusion alert\r\n"));
+  client.println(F("There has been some movement."));
+  client.print(day());
+  client.print(F("-"));
+  client.print(month());
+  client.print(F("-"));
+  client.print(year());
+  client.print(F(" at "));
+  client.print(hour());
+  client.print(F(":"));
+  client.print(minute());
+  client.print(F(":"));
+  client.print(second());
+  client.println(F("."));
+  client.println(F("."));
+  if (!eRcv()) return 0;
+  Serial.println(F("Sending QUIT"));
+  client.println(F("QUIT"));
+  if (!eRcv()) return 0;
+  client.stop();
+  Serial.println(F("disconnected"));
+  return 1;
+}
+byte eRcv() {
+  byte respCode;
+  byte thisByte;
+  int loopCount = 0;
+  while (!client.available()){
+    delay(1);
+    loopCount++;     // if nothing received for 10 seconds, timeout
+    if (loopCount > 10000) {
       client.stop();
       Serial.println(F("\r\nTimeout"));
       return 0;
@@ -370,8 +358,8 @@ unsigned long sendNTPpacket(IPAddress& address) {
   packetBuffer[14]  = 49;
   packetBuffer[15]  = 52;
 
-  // all NTP fields have been given values, now
-  // you can send a packet requesting a timestamp:
+  // all NTP fields have been given values
+  // send a packet requesting a timestamp:
   udp.beginPacket(address, 123); //NTP requests are to port 123
   udp.write(packetBuffer, NTP_PACKET_SIZE);
   udp.endPacket();
